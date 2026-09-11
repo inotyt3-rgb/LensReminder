@@ -18,10 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Extract project ZIP
-        run: |
-          unzip -o LensReminder-v1.1-GitHubActions.zip -d project
-          cp -r project/* .
-          cp -r project/.[!.]* . 2>/dev/null || true
+        run: unzip -o LensReminder-v1.1-GitHubActions.zip -d project
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -34,7 +31,9 @@ jobs:
 
       - name: Install Android SDK packages
         run: |
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
@@ -42,11 +41,12 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build APK
+        working-directory: project/LensReminder-v1.1-GitHubActions
         run: gradle --no-daemon :app:assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: LensReminder-v1.1-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: project/LensReminder-v1.1-GitHubActions/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
