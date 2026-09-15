@@ -32,12 +32,18 @@ jobs:
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
 
           if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)"
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
+              -name sdkmanager \
+              -type f \
+              -print -quit)"
           fi
 
           if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
             echo "ERROR: sdkmanager not found"
-            find "$ANDROID_HOME" -name sdkmanager -type f -print || true
+            find "$ANDROID_HOME" \
+              -name sdkmanager \
+              -type f \
+              -print || true
             exit 1
           fi
 
@@ -45,37 +51,73 @@ jobs:
 
           yes | "$SDKMANAGER" --licenses >/dev/null || true
 
-          "$SDKMANAGER" "platform-tools" \
+          "$SDKMANAGER" \
+            "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+      - name: Extract project ZIP
+        run: |
+          echo "Searching for project ZIP..."
+
+          ZIP_FILE="$(find . \
+            -maxdepth 2 \
+            -type f \
+            -name '*.zip' \
+            -not -path './.git/*' \
+            -print -quit)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Project ZIP not found"
+            find . -maxdepth 3 -type f -print
+            exit 1
+          fi
+
+          echo "Found ZIP: $ZIP_FILE"
+
+          mkdir -p extracted
+
+          unzip -o "$ZIP_FILE" -d extracted
+
+          echo "Extracted files:"
+          find extracted -maxdepth 4 -type f | sort | head -200
 
       - name: Find Gradle project
         run: |
-          echo "Searching for settings.gradle.kts..."
+          echo "Searching for Gradle project..."
 
-          PROJECT_DIR="$(find . -name settings.gradle.kts -type f \
-            -not -path './.git/*' \
+          PROJECT_DIR="$(find extracted \
+            -name settings.gradle.kts \
+            -type f \
+            -not -path '*/.gradle/*' \
             -print -quit | xargs -r dirname)"
 
           if [ -z "$PROJECT_DIR" ]; then
-            PROJECT_DIR="$(find . -name settings.gradle -type f \
-              -not -path './.git/*' \
+            PROJECT_DIR="$(find extracted \
+              -name settings.gradle \
+              -type f \
+              -not -path '*/.gradle/*' \
               -print -quit | xargs -r dirname)"
           fi
 
           if [ -z "$PROJECT_DIR" ]; then
             echo "ERROR: Gradle project not found"
-            find . -maxdepth 5 -type f | sort | head -200
+
+            echo "Directory tree:"
+            find extracted -maxdepth 6 -print | sort
+
             exit 1
           fi
 
+          echo "Gradle project found:"
+          echo "$PROJECT_DIR"
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Gradle project: $PROJECT_DIR"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
       - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}
@@ -88,8 +130,9 @@ jobs:
           mkdir -p release
 
           cp app/build/outputs/apk/debug/app-debug.apk \
-             release/LensReminder-v1.5.2-debug.apk
+            release/LensReminder-v1.5.2-debug.apk
 
+          echo "APK:"
           ls -lh release/
 
       - name: Upload APK
