@@ -1,17 +1,17 @@
-name: Build LensReminder APK
+name: Build APK
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build APK
+    name: Build LensReminder APK
     runs-on: ubuntu-latest
 
     steps:
@@ -24,71 +24,78 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK packages
+      - name: Prepare Android SDK
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
 
-      - name: Find project
-        run: |
-          echo "Repository contents:"
-          find . -maxdepth 3 -type f | sort
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
 
-      - name: Extract project ZIP if needed
-        run: |
-          mkdir -p extracted
-
-          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1 || true)
-
-          if [ -n "$ZIP_FILE" ]; then
-            echo "Found ZIP: $ZIP_FILE"
-            unzip -o "$ZIP_FILE" -d extracted
-          else
-            echo "No ZIP found. Using repository directly."
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -n 1)"
           fi
 
-      - name: Locate Gradle project
-        run: |
-          if [ -f "settings.gradle.kts" ] || [ -f "settings.gradle" ]; then
-            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
-            exit 0
-          fi
-
-          PROJECT=$(find extracted -type f \( -name "settings.gradle.kts" -o -name "settings.gradle" \) -print -quit | xargs -r dirname)
-
-          if [ -z "$PROJECT" ]; then
-            echo "ERROR: Gradle project not found."
-            echo "Files:"
-            find . -maxdepth 5 -type f | sort
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found"
+            find "$ANDROID_HOME" -name sdkmanager -type f -print || true
             exit 1
           fi
 
-          echo "Found Gradle project: $PROJECT"
-          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+          echo "Using sdkmanager: $SDKMANAGER"
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Build APK
+      - name: Find Gradle project
+        run: |
+          echo "Searching for settings.gradle.kts..."
+
+          PROJECT_DIR="$(find . -name settings.gradle.kts -type f \
+            -not -path './.git/*' \
+            -print -quit | xargs -r dirname)"
+
+          if [ -z "$PROJECT_DIR" ]; then
+            PROJECT_DIR="$(find . -name settings.gradle -type f \
+              -not -path './.git/*' \
+              -print -quit | xargs -r dirname)"
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Gradle project not found"
+            find . -maxdepth 5 -type f | sort | head -200
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Gradle project: $PROJECT_DIR"
+
+      - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           gradle --no-daemon :app:assembleDebug
 
-      - name: Find APK
+      - name: Prepare APK artifact
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          echo "APK files:"
-          find app/build/outputs -type f -name "*.apk" -print
+          mkdir -p release
+
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             release/LensReminder-v1.5.2-debug.apk
+
+          ls -lh release/
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: LensReminder-v1.1-debug
-          path: |
-            ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          name: LensReminder-v1.5.2-debug
+          path: ${{ env.PROJECT_DIR }}/release/LensReminder-v1.5.2-debug.apk
           if-no-files-found: error
+          retention-days: 30
